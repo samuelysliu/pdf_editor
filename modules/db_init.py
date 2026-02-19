@@ -13,7 +13,10 @@ class User(Base):
     uid = Column(Integer, primary_key=True, index=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(100), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)  # Google 登入用戶可能無密碼
+
+    # Google OAuth
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
 
     # 額度系統（統一額度）
     quota = Column(Integer, default=5, nullable=False)  # 可用額度餘額（頁數）
@@ -25,6 +28,7 @@ class User(Base):
     # 關係
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
     pdf_files = relationship("PDFFile", back_populates="user", cascade="all, delete-orphan")
+    subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
 
 
 class PDFFile(Base):
@@ -114,6 +118,38 @@ class PageImage(Base):
 
     # 關係
     pdf_file = relationship("PDFFile", back_populates="page_images")
+
+
+class Subscription(Base):
+    """用戶訂閱記錄。
+
+    訂閱制方案：每月吃到飽（額度設為 1,000,000）。
+    透過 Google Play 訂閱購買，到期後如未續訂則額度歸零。
+    """
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.uid"), nullable=False, index=True)
+
+    # 訂閱信息
+    product_id = Column(String(100), nullable=False)  # 訂閱商品 ID
+    transaction_id = Column(String(255), nullable=True)  # Google Play 訂閱交易 ID
+
+    # 訂閱期間
+    start_date = Column(DateTime, server_default=func.now(), nullable=False)
+    end_date = Column(DateTime, nullable=False)  # 訂閱到期日
+
+    # 狀態：active / expired / cancelled
+    status = Column(String(20), default="active", nullable=False)
+
+    # Google Play 收據
+    receipt_data = Column(Text, nullable=True)
+
+    # 時間戳
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    # 關係
+    user = relationship("User", back_populates="subscriptions")
 
 
 class Transaction(Base):

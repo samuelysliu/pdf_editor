@@ -35,6 +35,9 @@ class ProductModel {
   final String amountFormatted;
   final int quota;
   final String currency;
+  final String type; // 'one_time' or 'subscription'
+  final String? description;
+  final int? durationDays;
 
   ProductModel({
     required this.productId,
@@ -42,15 +45,23 @@ class ProductModel {
     required this.amountFormatted,
     required this.quota,
     required this.currency,
+    this.type = 'one_time',
+    this.description,
+    this.durationDays,
   });
+
+  bool get isSubscription => type == 'subscription';
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
     return ProductModel(
       productId: json['product_id'],
       amount: json['amount'],
       amountFormatted: json['amount_formatted'],
-      quota: json['quota'],
+      quota: json['quota'] ?? 0,
       currency: json['currency'] ?? 'USD',
+      type: json['type'] ?? 'one_time',
+      description: json['description'],
+      durationDays: json['duration_days'],
     );
   }
 }

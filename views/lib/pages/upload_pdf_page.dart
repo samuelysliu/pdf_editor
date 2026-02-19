@@ -5,7 +5,9 @@ import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 
 class UploadPdfPage extends StatefulWidget {
-  const UploadPdfPage({super.key});
+  final VoidCallback? onUploadSuccess;
+
+  const UploadPdfPage({super.key, this.onUploadSuccess});
 
   @override
   State<UploadPdfPage> createState() => _UploadPdfPageState();
@@ -74,6 +76,9 @@ class _UploadPdfPageState extends State<UploadPdfPage> {
         _selectedFileBytes = null;
         _selectedFileName = null;
       });
+
+      // 通知首頁重新載入 PDF 列表
+      widget.onUploadSuccess?.call();
 
       showDialog(
         context: context,

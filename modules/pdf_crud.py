@@ -3,14 +3,14 @@ This layer contains ONLY SQL operations for creating, reading, updating, and del
 All business logic is in controls/pdf_service.py"""
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from modules.db_init import User, PDFFile, Transaction, BrushStroke, PageImage
+from modules.db_init import User, PDFFile, BrushStroke, PageImage
 
 
 class PDFEditorCRUD:
-    """PDF 編輯器 CRUD 層 - 只負責數據庫操作（額度、PDF、交易）。
+    """PDF 編輯器 CRUD 層 - 只負責 PDF 相關的數據庫操作。
 
-    注意：用戶相關的 CRUD 操作已獨立到 modules/user_crud.py
+    注意：用戶相關的 CRUD 在 modules/user_crud.py
+    購買/訂閱相關的 CRUD 在 modules/payment_crud.py
     """
 
     # ============ Quota Operations ============
@@ -30,16 +30,6 @@ class PDFEditorCRUD:
         user = db.query(User).filter(User.uid == user_id).first()
         if user:
             user.quota -= pages
-            db.commit()
-            db.refresh(user)
-        return user
-
-    @staticmethod
-    def add_quota(db: Session, user_id: int, pages: int) -> User:
-        """增加用戶額度。"""
-        user = db.query(User).filter(User.uid == user_id).first()
-        if user:
-            user.quota += pages
             db.commit()
             db.refresh(user)
         return user
@@ -102,43 +92,6 @@ class PDFEditorCRUD:
             db.commit()
             return True
         return False
-
-    # ============ Transaction Operations ============
-    @staticmethod
-    def create_transaction(db: Session, user_id: int, **kwargs) -> Transaction:
-        """創建交易記錄。"""
-        try:
-            transaction = Transaction(user_id=user_id, **kwargs)
-            db.add(transaction)
-            db.commit()
-            db.refresh(transaction)
-            return transaction
-        except IntegrityError:
-            db.rollback()
-            raise ValueError("Transaction already exists")
-
-    @staticmethod
-    def get_transaction(db: Session, transaction_id: str, user_id: int) -> Optional[Transaction]:
-        """根據交易 ID 獲取交易記錄。"""
-        return db.query(Transaction).filter(
-            Transaction.transaction_id == transaction_id,
-            Transaction.user_id == user_id
-        ).first()
-
-    @staticmethod
-    def get_user_transactions(db: Session, user_id: int, limit: int = 50) -> List[Transaction]:
-        """獲取用戶的交易記錄。"""
-        return db.query(Transaction).filter(
-            Transaction.user_id == user_id
-        ).order_by(Transaction.created_at.desc()).limit(limit).all()
-
-    @staticmethod
-    def update_transaction_status(db: Session, transaction: Transaction, status: str) -> Transaction:
-        """更新交易狀態。"""
-        transaction.status = status
-        db.commit()
-        db.refresh(transaction)
-        return transaction
 
     # ============ BrushStroke Operations ============
     @staticmethod

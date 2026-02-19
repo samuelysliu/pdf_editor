@@ -1,4 +1,7 @@
 """FastAPI 主應用程序。"""
+from dotenv import load_dotenv
+load_dotenv()  # 讀取 .env 檔
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from modules.db_init import Base

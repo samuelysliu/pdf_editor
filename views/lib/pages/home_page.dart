@@ -20,14 +20,21 @@ class _HomePageState extends State<HomePage> {
   String? _email;
   int? _quota;
 
-  final List<Widget> _pages = [
-    const ManagePdfPage(),
-    const UploadPdfPage(),
-  ];
+  final GlobalKey<ManagePdfPageState> _managePdfKey = GlobalKey<ManagePdfPageState>();
+
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _pages = [
+      ManagePdfPage(key: _managePdfKey),
+      UploadPdfPage(
+        onUploadSuccess: () {
+          _managePdfKey.currentState?.refresh();
+        },
+      ),
+    ];
     _loadProfile();
   }
 

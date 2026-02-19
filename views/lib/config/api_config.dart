@@ -9,6 +9,7 @@ class ApiConfig {
   // Auth
   static const String register = '/api/v1/users/register';
   static const String login = '/api/v1/users/login';
+  static const String googleLogin = '/api/v1/users/google-login';
   static const String profile = '/api/v1/users/profile';
 
   // PDF
@@ -42,4 +43,9 @@ class ApiConfig {
   static const String paymentProducts = '/api/payment/products';
   static const String paymentTransactions = '/api/payment/transactions';
   static const String paymentMockPurchase = '/api/payment/mock-purchase';
+
+  // Subscription
+  static const String subscriptionStatus = '/api/payment/subscription/status';
+  static const String subscriptionValidate = '/api/payment/subscription/google-play/validate';
+  static const String subscriptionMockPurchase = '/api/payment/subscription/mock-purchase';
 }

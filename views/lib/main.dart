@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'services/auth_service.dart';
+import 'services/billing_service.dart';
 import 'pages/login_page.dart';
 import 'pages/home_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 初始化 Google Play Billing（行動平台才真正啟用）
+  BillingService().initialize();
   runApp(const PdfEditorApp());
 }
 

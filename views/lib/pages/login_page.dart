@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../services/api_service.dart';
 import 'register_page.dart';
 import 'forgot_password_page.dart';
 import 'home_page.dart';
+
+/// ============================================================
+///  ⚠️ Google OAuth Client ID 設定
+///  請填入你在 Google Cloud Console 建立的 OAuth 2.0 Client ID
+/// ============================================================
+const String _googleClientId =
+    ''; // TODO: 填入你的 Google OAuth Client ID (Web 或 Android)
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -16,6 +24,7 @@ class _LoginPageState extends State<LoginPage> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _isGoogleLoading = false;
   bool _obscurePassword = true;
 
   @override
@@ -53,6 +62,76 @@ class _LoginPageState extends State<LoginPage> {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  /// Google 第三方登入
+  Future<void> _googleSignIn() async {
+    setState(() => _isGoogleLoading = true);
+
+    try {
+      final googleSignIn = GoogleSignIn(
+        clientId: _googleClientId.isNotEmpty ? _googleClientId : null,
+        scopes: ['email', 'profile'],
+      );
+
+      final account = await googleSignIn.signIn();
+      if (account == null) {
+        // 使用者取消
+        setState(() => _isGoogleLoading = false);
+        return;
+      }
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+
+      if (idToken == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('無法取得 Google ID Token'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() => _isGoogleLoading = false);
+        return;
+      }
+
+      // 呼叫後端 Google 登入 API
+      final result = await ApiService.googleLogin(
+        idToken: idToken,
+        email: account.email,
+        displayName: account.displayName,
+      );
+
+      setState(() => _isGoogleLoading = false);
+
+      if (!mounted) return;
+
+      if (result.success) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message ?? 'Google 登入失敗'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => _isGoogleLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Google 登入錯誤：$e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -138,6 +217,44 @@ class _LoginPageState extends State<LoginPage> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Text('登入', style: TextStyle(fontSize: 16)),
+              ),
+              const SizedBox(height: 12),
+
+              // 分隔線
+              Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('或', style: TextStyle(color: Colors.grey.shade600)),
+                  ),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Google 登入按鈕
+              OutlinedButton.icon(
+                onPressed: _isGoogleLoading ? null : _googleSignIn,
+                icon: _isGoogleLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Image.network(
+                        'https://developers.google.com/identity/images/g-logo.png',
+                        height: 20,
+                        width: 20,
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.g_mobiledata, size: 24),
+                      ),
+                label: const Text('使用 Google 帳號登入',
+                    style: TextStyle(fontSize: 15)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: BorderSide(color: Colors.grey.shade400),
+                ),
               ),
               const SizedBox(height: 16),
 

@@ -34,6 +34,24 @@ class UserCRUD:
     def get_user_by_email(db: Session, email: str) -> Optional[User]:
         """根據郵箱獲取用戶。"""
         return db.query(User).filter(User.email == email).first()
+
+    @staticmethod
+    def get_user_by_google_id(db: Session, google_id: str) -> Optional[User]:
+        """根據 Google ID 獲取用戶。"""
+        return db.query(User).filter(User.google_id == google_id).first()
+
+    @staticmethod
+    def create_google_user(db: Session, google_id: str, email: str, username: str) -> User:
+        """創建 Google OAuth 用戶（無密碼）。"""
+        try:
+            user = User(google_id=google_id, email=email, username=username)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            return user
+        except IntegrityError:
+            db.rollback()
+            raise ValueError("Google user already exists")
     
     @staticmethod
     def get_user_by_id(db: Session, user_id: int) -> Optional[User]:

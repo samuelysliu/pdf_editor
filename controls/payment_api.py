@@ -8,6 +8,7 @@ import json
 from modules.db_connect import get_db
 from controls.pdf_service import PDFEditorService
 from controls.tools import verify_token
+from controls import google_play_verifier
 
 router = APIRouter(prefix="/api/payment", tags=["Payment"])
 
@@ -36,6 +37,15 @@ PRODUCT_QUOTA_MAP = {
     "pdf_editor_5000_pages": {
         "amount": 5000,  # $50.00
         "quota": 5000
+    }
+}
+
+# 訂閱制商品配置
+SUBSCRIPTION_PRODUCTS = {
+    "pdf_editor_monthly_unlimited": {
+        "amount": 990,  # $9.90/月
+        "duration_days": 30,
+        "description": "月訂閱 - 無限使用",
     }
 }
 
@@ -118,14 +128,25 @@ def validate_google_play_purchase(
         
         product_info = PRODUCT_QUOTA_MAP[request.product_id]
         
-        # 步驟 2：模擬 Google Play 驗證
-        # 實際環境應調用 Google Play Developer API
-        # 這裡簡化為檢查 receipt_data 不為空
-        if not request.receipt_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid receipt data"
+        # 步驟 2：驗證 Google Play 收據
+        if google_play_verifier.is_configured():
+            # 真實驗證：呼叫 Google Play Developer API
+            verify_result = google_play_verifier.verify_one_time_purchase(
+                product_id=request.product_id,
+                purchase_token=request.receipt_data,
             )
+            if not verify_result.get("valid"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Google Play 驗證失敗：{verify_result.get('error', 'invalid purchase')}"
+                )
+        else:
+            # 未設定 Google Play 驗證 → 僅檢查 receipt_data 非空（開發模式）
+            if not request.receipt_data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid receipt data"
+                )
         
         # 步驟 3：處理支付
         result = PDFEditorService.process_payment(
@@ -169,9 +190,23 @@ def get_available_products() -> Dict[str, Any]:
                 "amount": info["amount"],
                 "amount_formatted": f"${info['amount'] / 100:.2f}",
                 "quota": info["quota"],
-                "currency": "USD"
+                "currency": "USD",
+                "type": "one_time",
             })
-        
+
+        # 加入訂閱商品
+        for product_id, info in SUBSCRIPTION_PRODUCTS.items():
+            products.append({
+                "product_id": product_id,
+                "amount": info["amount"],
+                "amount_formatted": f"${info['amount'] / 100:.2f}/月",
+                "quota": 0,  # 訂閱制不用 quota 欄位
+                "currency": "USD",
+                "type": "subscription",
+                "description": info["description"],
+                "duration_days": info["duration_days"],
+            })
+
         return {
             "success": True,
             "data": {
@@ -195,9 +230,9 @@ def get_transaction_history(
         user_id: 用戶ID
     """
     try:
-        from modules.pdf_crud import PDFEditorCRUD
+        from modules.payment_crud import PaymentCRUD
         
-        transactions = PDFEditorCRUD.get_user_transactions(db, user_id, limit)
+        transactions = PaymentCRUD.get_user_transactions(db, user_id, limit)
         
         return {
             "success": True,
@@ -280,3 +315,148 @@ def mock_purchase(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+# ============ 訂閱制 API ============
+
+# 取得用戶訂閱狀態
+@router.get("/subscription/status", response_model=Dict[str, Any])
+def get_subscription_status(
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_user_id)
+) -> Dict[str, Any]:
+    """取得用戶當前訂閱狀態。"""
+    try:
+        # 先檢查過期訂閱
+        PDFEditorService.check_and_expire_subscriptions(db, user_id)
+        result = PDFEditorService.get_subscription_status(db, user_id)
+        return {
+            "success": True,
+            "data": result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 驗證 Google Play 訂閱購買
+@router.post("/subscription/google-play/validate", response_model=Dict[str, Any])
+def validate_subscription_purchase(
+    request: GooglePlayValidationRequest,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_user_id)
+) -> Dict[str, Any]:
+    """
+    流程：
+    1. 驗證商品 ID 是否為訂閱商品
+    2. 模擬驗證收據
+    3. 啟用訂閱 + 設定額度 100 萬
+    """
+    try:
+        if request.product_id not in SUBSCRIPTION_PRODUCTS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid subscription product ID"
+            )
+
+        if not request.receipt_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid receipt data"
+            )
+
+        product_info = SUBSCRIPTION_PRODUCTS[request.product_id]
+
+        # 驗證 Google Play 訂閱收據
+        if google_play_verifier.is_configured():
+            verify_result = google_play_verifier.verify_subscription(
+                subscription_id=request.product_id,
+                purchase_token=request.receipt_data,
+            )
+            if not verify_result.get("valid"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Google Play 訂閱驗證失敗：{verify_result.get('error', 'invalid subscription')}"
+                )
+            # 從 Google Play 回應取得實際到期時間
+            expiry_millis = int(verify_result.get("expiry_time_millis", 0))
+            if expiry_millis > 0:
+                from datetime import datetime
+                expiry_dt = datetime.utcfromtimestamp(expiry_millis / 1000)
+                now = datetime.utcnow()
+                duration_days = max(1, (expiry_dt - now).days)
+                product_info = {**product_info, "duration_days": duration_days}
+
+        result = PDFEditorService.activate_subscription(
+            db,
+            user_id,
+            product_id=request.product_id,
+            transaction_id=request.transaction_id,
+            receipt_data=request.receipt_data,
+            duration_days=product_info["duration_days"],
+        )
+
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result["message"]
+            )
+
+        return {
+            "success": True,
+            "message": result["message"],
+            "data": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 模擬訂閱購買（測試用）
+@router.post("/subscription/mock-purchase", response_model=Dict[str, Any])
+def mock_subscription_purchase(
+    product_id: str,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_user_id)
+) -> Dict[str, Any]:
+    """
+    模擬訂閱購買，直接啟用訂閱。僅限開發/測試環境使用。
+    """
+    try:
+        if product_id not in SUBSCRIPTION_PRODUCTS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid subscription product ID"
+            )
+
+        product_info = SUBSCRIPTION_PRODUCTS[product_id]
+
+        import uuid
+        transaction_id = f"MOCK-SUB-{uuid.uuid4().hex[:16].upper()}"
+
+        result = PDFEditorService.activate_subscription(
+            db,
+            user_id,
+            product_id=product_id,
+            transaction_id=transaction_id,
+            receipt_data="MOCK_SUBSCRIPTION_RECEIPT",
+            duration_days=product_info["duration_days"],
+        )
+
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result["message"]
+            )
+
+        return {
+            "success": True,
+            "message": "Mock subscription activated",
+            "data": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -1,4 +1,4 @@
-name: pdf_editor_app
+name: pdfease
 description: PDF Editor Flutter Frontend
 
 publish_to: 'none'
@@ -24,6 +24,12 @@ dependencies:
 
   # PDF Viewer
   syncfusion_flutter_pdfviewer: ^24.1.0
+
+  # Google Play Billing (In-App Purchase)
+  in_app_purchase: ^3.2.0
+
+  # Google Sign-In
+  google_sign_in: ^6.2.1
 
   # UI
   cupertino_icons: ^1.0.6

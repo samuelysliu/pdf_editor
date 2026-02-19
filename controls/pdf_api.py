@@ -1013,11 +1013,16 @@ def download_pdf(
         if not download_name.lower().endswith('.pdf'):
             download_name += '.pdf'
 
+        # 使用 RFC 5987 編碼處理非 ASCII 檔名
+        from urllib.parse import quote
+        ascii_name = download_name.encode('ascii', 'replace').decode('ascii')
+        utf8_name = quote(download_name, safe='')
+
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f'attachment; filename="{download_name}"'
+                "Content-Disposition": f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{utf8_name}"
             }
         )
 

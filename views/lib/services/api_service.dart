@@ -208,6 +208,45 @@ class ApiService {
     );
   }
 
+  /// Google 第三方登入
+  /// POST /api/v1/users/google-login
+  static Future<ApiResult<AuthResponse>> googleLogin({
+    required String idToken,
+    String? email,
+    String? displayName,
+  }) async {
+    final result = await _post(
+      ApiConfig.googleLogin,
+      body: {
+        'id_token': idToken,
+        if (email != null) 'email': email,
+        if (displayName != null) 'display_name': displayName,
+      },
+      requireAuth: false,
+    );
+
+    if (result.success && result.data != null) {
+      final auth = AuthResponse.fromJson(result.data!);
+      await AuthService.saveAuth(
+        token: auth.accessToken,
+        userId: auth.userId,
+        username: auth.username,
+      );
+      return ApiResult(
+        success: true,
+        data: auth,
+        message: result.message,
+        statusCode: result.statusCode,
+      );
+    }
+
+    return ApiResult(
+      success: false,
+      message: result.message,
+      statusCode: result.statusCode,
+    );
+  }
+
   /// 取得個人資料
   /// GET /api/v1/users/profile
   static Future<ApiResult<UserModel>> getProfile() async {
@@ -760,6 +799,66 @@ class ApiService {
     try {
       final uri = Uri.parse(
         '${ApiConfig.baseUrl}${ApiConfig.paymentMockPurchase}?product_id=$productId',
+      );
+      final headers = await AuthService.getAuthHeaders();
+      final response = await http.post(uri, headers: headers);
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+
+      return ApiResult(
+        success: response.statusCode == 200,
+        data: body,
+        message: body['message'] ?? body['detail'],
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      return ApiResult(
+        success: false,
+        message: '網路錯誤：$e',
+        statusCode: 0,
+      );
+    }
+  }
+
+  // ============================================================
+  //  📋 訂閱 API
+  // ============================================================
+
+  /// 取得訂閱狀態
+  /// GET /api/payment/subscription/status
+  static Future<ApiResult<Map<String, dynamic>>> getSubscriptionStatus() async {
+    final result = await _get(ApiConfig.subscriptionStatus);
+    if (result.success && result.data != null) {
+      final data = result.data!['data'] as Map<String, dynamic>;
+      return ApiResult(success: true, data: data, statusCode: result.statusCode);
+    }
+    return ApiResult(success: false, message: result.message, statusCode: result.statusCode);
+  }
+
+  /// 驗證 Google Play 訂閱購買
+  /// POST /api/payment/subscription/google-play/validate
+  static Future<ApiResult<Map<String, dynamic>>> validateSubscriptionPurchase({
+    required String transactionId,
+    required String productId,
+    required String receiptData,
+  }) async {
+    return _post(
+      ApiConfig.subscriptionValidate,
+      body: {
+        'transaction_id': transactionId,
+        'product_id': productId,
+        'receipt_data': receiptData,
+      },
+    );
+  }
+
+  /// 模擬訂閱購買（測試用）
+  /// POST /api/payment/subscription/mock-purchase?product_id=xxx
+  static Future<ApiResult<Map<String, dynamic>>> mockSubscriptionPurchase(
+    String productId,
+  ) async {
+    try {
+      final uri = Uri.parse(
+        '${ApiConfig.baseUrl}${ApiConfig.subscriptionMockPurchase}?product_id=$productId',
       );
       final headers = await AuthService.getAuthHeaders();
       final response = await http.post(uri, headers: headers);

@@ -48,3 +48,5 @@ app.*.map.json
 *.md
 /venv/
 /uploads/
+project-c02ae071-e5c5-4fc4-9dc-29a1f42dbaea.json
+.env

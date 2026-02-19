@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../models/pdf_model.dart';
 import '../services/api_service.dart';
+import '../services/billing_service.dart';
 import 'pdf_editor_page.dart';
 import 'web_download_stub.dart'
     if (dart.library.html) 'web_download.dart' as download_helper;
@@ -12,13 +13,16 @@ class ManagePdfPage extends StatefulWidget {
   const ManagePdfPage({super.key});
 
   @override
-  State<ManagePdfPage> createState() => _ManagePdfPageState();
+  State<ManagePdfPage> createState() => ManagePdfPageState();
 }
 
-class _ManagePdfPageState extends State<ManagePdfPage> {
+class ManagePdfPageState extends State<ManagePdfPage> {
   List<PdfFileModel> _pdfFiles = [];
   int? _quota;
   bool _isLoading = true;
+
+  /// 供外部呼叫重新載入資料
+  void refresh() => _loadData();
 
   // 合併模式
   bool _isMergeMode = false;
@@ -202,8 +206,11 @@ class _ManagePdfPageState extends State<ManagePdfPage> {
 
   /// 模擬購買額度
   Future<void> _showPurchaseDialog() async {
-    // 先取得商品列表
+    // 先取得商品列表和訂閱狀態
     final productsResult = await ApiService.getProducts();
+    final subStatusResult = await ApiService.getSubscriptionStatus();
+    final billing = BillingService();
+
     if (!productsResult.success || productsResult.data == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -216,39 +223,108 @@ class _ManagePdfPageState extends State<ManagePdfPage> {
     if (!mounted) return;
 
     final products = productsResult.data!;
+    final isSubscribed = subStatusResult.success &&
+        subStatusResult.data != null &&
+        (subStatusResult.data!['is_subscribed'] == true);
+    final subscriptionEndDate = subStatusResult.data?['end_date'];
+
+    // 分為一次性商品和訂閱商品
+    final oneTimeProducts = products.where((p) => !p.isSubscription).toList();
+    final subscriptionProducts = products.where((p) => p.isSubscription).toList();
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('購買額度'),
         content: SizedBox(
           width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: products.length,
-            itemBuilder: (_, index) {
-              final p = products[index];
-              return ListTile(
-                title: Text('${p.quota} 頁'),
-                subtitle: Text(p.amountFormatted),
-                trailing: ElevatedButton(
-                  onPressed: () async {
-                    Navigator.pop(context);
-                    // 使用 mock purchase 測試
-                    final result = await ApiService.mockPurchase(p.productId);
-                    if (result.success && mounted) {
-                      await _loadData();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('購買成功！+${p.quota} 頁'),
-                          backgroundColor: Colors.green,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // === 訂閱制區塊 ===
+                if (isSubscribed) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.shade300),
+                    ),
+                    child: Column(
+                      children: [
+                        const Icon(Icons.star, color: Colors.amber, size: 32),
+                        const SizedBox(height: 4),
+                        const Text(
+                          '訂閱中 — 無限使用',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
-                      );
-                    }
-                  },
-                  child: const Text('購買'),
+                        if (subscriptionEndDate != null)
+                          Text(
+                            '到期日：${subscriptionEndDate.toString().substring(0, 10)}',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ] else if (subscriptionProducts.isNotEmpty) ...[
+                  const Text(
+                    '⭐ 訂閱方案',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                  const SizedBox(height: 4),
+                  ...subscriptionProducts.map((p) => Card(
+                    color: Colors.amber.shade50,
+                    child: ListTile(
+                      leading: const Icon(Icons.all_inclusive, color: Colors.deepOrange),
+                      title: Text(p.description ?? '月訂閱 — 無限使用'),
+                      subtitle: Text('${p.amountFormatted}  ·  每月吃到飽'),
+                      trailing: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepOrange,
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(context);
+                          await _purchaseSubscription(p.productId);
+                        },
+                        child: Text(
+                          billing.isAvailable
+                              ? (billing.getPrice(p.productId) ?? '訂閱')
+                              : '訂閱',
+                        ),
+                      ),
+                    ),
+                  )),
+                  const Divider(height: 24),
+                ],
+
+                // === 一次性購買區塊 ===
+                const Text(
+                  '💰 單次購買',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 ),
-              );
-            },
+                const SizedBox(height: 4),
+                ...oneTimeProducts.map((p) => ListTile(
+                  title: Text('${p.quota} 頁'),
+                  subtitle: Text(
+                    billing.isAvailable
+                        ? (billing.getPrice(p.productId) ?? p.amountFormatted)
+                        : p.amountFormatted,
+                  ),
+                  trailing: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      await _purchaseOneTime(p.productId, p.quota);
+                    },
+                    child: const Text('購買'),
+                  ),
+                )),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -259,6 +335,104 @@ class _ManagePdfPageState extends State<ManagePdfPage> {
         ],
       ),
     );
+  }
+
+  /// 購買一次性商品
+  Future<void> _purchaseOneTime(String productId, int quota) async {
+    final billing = BillingService();
+
+    if (billing.isAvailable) {
+      // 真實 Google Play 購買
+      await billing.buyOneTimeProduct(
+        productId,
+        onComplete: (success, message) async {
+          if (success && mounted) {
+            await _loadData();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('購買成功！+$quota 頁'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+      );
+    } else {
+      // Web / 桌面版 fallback 到 mock
+      final result = await ApiService.mockPurchase(productId);
+      if (result.success && mounted) {
+        await _loadData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('購買成功！+$quota 頁'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('購買失敗：${result.message ?? "未知錯誤"}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// 購買訂閱方案
+  Future<void> _purchaseSubscription(String productId) async {
+    final billing = BillingService();
+
+    if (billing.isAvailable) {
+      // 真實 Google Play 訂閱
+      await billing.buySubscription(
+        productId,
+        onComplete: (success, message) async {
+          if (success && mounted) {
+            await _loadData();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('訂閱成功！已啟用無限使用 🎉'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        },
+      );
+    } else {
+      // Web / 桌面版 fallback 到 mock
+      final result = await ApiService.mockSubscriptionPurchase(productId);
+      if (result.success && mounted) {
+        await _loadData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('訂閱成功！已啟用無限使用 🎉'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('訂閱失敗：${result.message ?? "未知錯誤"}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   /// 打開編輯頁面

@@ -2,18 +2,24 @@
 All business logic for quota management, PDF operations, and payment handling.
 CRUD operations are delegated to modules/pdf_crud.py and modules/user_crud.py"""
 import os
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from io import BytesIO
 from sqlalchemy.orm import Session
 from PyPDF2 import PdfMerger, PdfReader
 from modules.pdf_crud import PDFEditorCRUD
+from modules.payment_crud import PaymentCRUD
 from modules.user_crud import UserCRUD
+
+# 訂閱制額度：100 萬頁（吃到飽）
+SUBSCRIPTION_QUOTA = 1_000_000
 
 
 class PDFEditorService:
     """PDF 編輯器業務邏輯層。"""
 
     # ============ Quota Management ============
+    # 檢查額度並扣除。
     @staticmethod
     def check_and_deduct_quota(
         db: Session,
@@ -21,8 +27,6 @@ class PDFEditorService:
         pages_required: int
     ) -> Dict[str, Any]:
         """
-        檢查額度並扣除。
-
         Args:
             db: 數據庫會話
             user_id: 用戶 ID
@@ -37,6 +41,10 @@ class PDFEditorService:
         user = UserCRUD.get_user_by_id(db, user_id)
         if not user:
             raise ValueError("User not found")
+
+        # 檢查訂閱是否過期
+        PDFEditorService.check_and_expire_subscriptions(db, user_id)
+        db.refresh(user)
 
         # 檢查額度是否足夠
         if user.quota < pages_required:
@@ -60,27 +68,28 @@ class PDFEditorService:
             "quota_remaining": user.quota
         }
 
+    # 獲取用戶的當前額度狀態。
     @staticmethod
     def get_quota_status(db: Session, user_id: int) -> Dict[str, Any]:
-        """
-        獲取用戶的當前額度狀態。
-
-        Args:
-            db: 數據庫會話
-            user_id: 用戶 ID
-
-        Returns:
-            包含額度狀態的字典
-        """
         user = UserCRUD.get_user_by_id(db, user_id)
         if not user:
             raise ValueError("User not found")
 
+        # 檢查訂閱是否過期
+        PDFEditorService.check_and_expire_subscriptions(db, user_id)
+        db.refresh(user)
+
+        # 取得訂閱狀態
+        sub = PaymentCRUD.get_active_subscription(db, user_id)
+
         return {
-            "quota": user.quota
+            "quota": user.quota,
+            "is_subscribed": sub is not None,
+            "subscription_end_date": sub.end_date.isoformat() if sub else None,
         }
 
     # ============ PDF File Operations ============
+    # 處理 PDF 上傳並扣除額度。
     @staticmethod
     def upload_pdf(
         db: Session,
@@ -90,9 +99,6 @@ class PDFEditorService:
         file_size: int,
         page_count: int
     ) -> Dict[str, Any]:
-        """
-        處理 PDF 上傳並扣除額度。
-        """
         # 檢查並扣除額度
         quota_result = PDFEditorService.check_and_deduct_quota(db, user_id, page_count)
 
@@ -126,9 +132,9 @@ class PDFEditorService:
             "quota_remaining": quota_result["quota_remaining"]
         }
 
+    # 獲取用戶的 PDF 文件列表。
     @staticmethod
     def get_pdf_files(db: Session, user_id: int, limit: int = 50) -> Dict[str, Any]:
-        """獲取用戶的 PDF 文件列表。"""
         pdf_files = PDFEditorCRUD.get_user_pdf_files(db, user_id, limit)
 
         return {
@@ -264,6 +270,7 @@ class PDFEditorService:
             ]
         }
 
+    # 處理支付並增加額度。
     @staticmethod
     def process_payment(
         db: Session,
@@ -275,8 +282,6 @@ class PDFEditorService:
         receipt_data: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        處理支付並增加額度。
-
         Args:
             db: 數據庫會話
             user_id: 用戶 ID
@@ -290,7 +295,7 @@ class PDFEditorService:
             包含支付結果的字典
         """
         # 檢查交易是否已存在
-        existing_transaction = PDFEditorCRUD.get_transaction(db, transaction_id, user_id)
+        existing_transaction = PaymentCRUD.get_transaction(db, transaction_id, user_id)
         if existing_transaction:
             return {
                 "success": False,
@@ -299,7 +304,7 @@ class PDFEditorService:
             }
 
         # 創建交易記錄
-        transaction = PDFEditorCRUD.create_transaction(
+        transaction = PaymentCRUD.create_transaction(
             db,
             user_id,
             transaction_id=transaction_id,
@@ -311,7 +316,7 @@ class PDFEditorService:
         )
 
         # 增加用戶額度
-        PDFEditorCRUD.add_quota(db, user_id, quota_to_add)
+        PaymentCRUD.add_quota(db, user_id, quota_to_add)
 
         # 獲取更新後的額度信息
         quota_info = PDFEditorCRUD.get_quota_info(db, user_id)
@@ -323,3 +328,125 @@ class PDFEditorService:
             "quota_added": quota_to_add,
             "quota_remaining": quota_info["quota"]
         }
+
+    # ============ Subscription Operations ============
+    # 獲取用戶的訂閱狀態。
+    @staticmethod
+    def get_subscription_status(db: Session, user_id: int) -> Dict[str, Any]:
+        sub = PaymentCRUD.get_active_subscription(db, user_id)
+        if sub:
+            return {
+                "is_subscribed": True,
+                "product_id": sub.product_id,
+                "start_date": sub.start_date.isoformat(),
+                "end_date": sub.end_date.isoformat(),
+                "status": sub.status,
+                "subscription_id": sub.id,
+            }
+        return {
+            "is_subscribed": False,
+        }
+
+    # 啟用訂閱方案：設定額度為 100 萬（吃到飽）。
+    @staticmethod
+    def activate_subscription(
+        db: Session,
+        user_id: int,
+        product_id: str,
+        transaction_id: Optional[str] = None,
+        receipt_data: Optional[str] = None,
+        duration_days: int = 30,
+    ) -> Dict[str, Any]:
+        """
+        Args:
+            db: 數據庫會話
+            user_id: 用戶 ID
+            product_id: 訂閱商品 ID
+            transaction_id: Google Play 交易 ID
+            receipt_data: Google Play 收據
+            duration_days: 訂閱天數（預設 30 天）
+
+        Returns:
+            包含訂閱結果的字典
+        """
+        user = UserCRUD.get_user_by_id(db, user_id)
+        if not user:
+            return {"success": False, "message": "User not found"}
+
+        now = datetime.utcnow()
+        end_date = now + timedelta(days=duration_days)
+
+        # 檢查是否已有有效訂閱
+        existing_sub = PaymentCRUD.get_active_subscription(db, user_id)
+        if existing_sub:
+            # 延長現有訂閱
+            existing_sub.end_date = max(existing_sub.end_date, now) + timedelta(days=duration_days)
+            db.commit()
+            db.refresh(existing_sub)
+
+            # 確保額度設為吃到飽
+            user.quota = SUBSCRIPTION_QUOTA
+            db.commit()
+            db.refresh(user)
+
+            return {
+                "success": True,
+                "message": "Subscription extended",
+                "subscription_id": existing_sub.id,
+                "end_date": existing_sub.end_date.isoformat(),
+                "quota_remaining": user.quota,
+            }
+
+        # 創建新訂閱
+        sub = PaymentCRUD.create_subscription(
+            db,
+            user_id,
+            product_id=product_id,
+            transaction_id=transaction_id,
+            start_date=now,
+            end_date=end_date,
+            status="active",
+            receipt_data=receipt_data,
+        )
+
+        # 設定額度為吃到飽
+        user.quota = SUBSCRIPTION_QUOTA
+        db.commit()
+        db.refresh(user)
+
+        return {
+            "success": True,
+            "message": "Subscription activated",
+            "subscription_id": sub.id,
+            "start_date": sub.start_date.isoformat(),
+            "end_date": sub.end_date.isoformat(),
+            "quota_remaining": user.quota,
+        }
+
+    #  檢查用戶訂閱是否過期，若過期則將額度歸零。
+    @staticmethod
+    def check_and_expire_subscriptions(db: Session, user_id: int) -> None:
+        """
+        此方法應在用戶請求時調用（如查詢額度、上傳 PDF 等）。
+        """
+        from modules.db_init import Subscription
+        now = datetime.utcnow()
+        # 找出該用戶所有已過期但仍標記為 active 的訂閱
+        expired_subs = db.query(Subscription).filter(
+            Subscription.user_id == user_id,
+            Subscription.status == "active",
+            Subscription.end_date <= now,
+        ).all()
+
+        if expired_subs:
+            for sub in expired_subs:
+                sub.status = "expired"
+            db.commit()
+
+            # 如果沒有其他有效訂閱，額度歸零
+            still_active = PaymentCRUD.get_active_subscription(db, user_id)
+            if not still_active:
+                user = UserCRUD.get_user_by_id(db, user_id)
+                if user:
+                    user.quota = 0
+                    db.commit()
