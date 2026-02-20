@@ -40,6 +40,17 @@ RUN mkdir -p uploads
 
 # Cloud Run 會注入 PORT 環境變數（預設 8080）
 ENV PORT=8080
+ENV GOOGLE_SERVICE_ACCOUNT_KEY_PATH=project-c02ae071-e5c5-4fc4-9dc-29a1f42dbaea.json
+ENV GOOGLE_PLAY_PACKAGE_NAME=com.pdfease.app
+ENV GOOGLE_OAUTH_CLIENT_ID=818391536195-vop2sgq7ckpusald1mtr3rjvbuiajfj2.apps.googleusercontent.com
+
+ENV DB_USER=postgres
+ENV DB_PASSWORD=XSW@1qaz
+ENV DB_HOST=127.0.0.1
+ENV DB_PORT=5433
+ENV DB_NAME=pdfease
+ENV CLOUD_SQL_CONNECTION_NAME=project-c02ae071-e5c5-4fc4-9dc:asia-east1:fastapi-pg
+
 
 EXPOSE ${PORT}
 
