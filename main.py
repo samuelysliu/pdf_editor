@@ -1,4 +1,5 @@
 """FastAPI 主應用程序。"""
+import logging
 from dotenv import load_dotenv
 load_dotenv()  # 讀取 .env 檔
 
@@ -10,8 +11,14 @@ from controls.pdf_api import router as pdf_router
 from controls.auth_api import router as auth_router
 from controls.payment_api import router as payment_router
 
-# 創建所有數據庫表
-Base.metadata.create_all(bind=engine)
+logger = logging.getLogger(__name__)
+
+# 創建所有數據庫表（容錯：DB 連線失敗不阻擋 app 啟動）
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created / verified.")
+except Exception as e:
+    logger.error(f"Failed to create tables on startup: {e}")
 
 # 創建 FastAPI 應用
 app = FastAPI(
