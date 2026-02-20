@@ -1,16 +1,18 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../services/api_service.dart';
-import 'register_page.dart';
-import 'forgot_password_page.dart';
 import 'home_page.dart';
 
 /// ============================================================
 ///  ⚠️ Google OAuth Client ID 設定
-///  請填入你在 Google Cloud Console 建立的 OAuth 2.0 Client ID
+///  這是「Web 應用程式」類型的 Client ID，用途：
+///    - Web 平台：作為 clientId 傳入 GoogleSignIn
+///    - Android：作為 serverClientId，讓 SDK 回傳 idToken 給後端驗證
+///  Android 的 OAuth Client ID 由 SDK 自動透過 SHA-1 + packageName 解析。
 /// ============================================================
-const String _googleClientId =
-    ''; // TODO: 填入你的 Google OAuth Client ID (Web 或 Android)
+const String _googleWebClientId =
+    '818391536195-vop2sgq7ckpusald1mtr3rjvbuiajfj2.apps.googleusercontent.com';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -20,85 +22,42 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
   bool _isGoogleLoading = false;
-  bool _obscurePassword = true;
+  late final GoogleSignIn _googleSignIn;
 
   @override
-  void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    final result = await ApiService.login(
-      username: _usernameController.text.trim(),
-      password: _passwordController.text,
+  void initState() {
+    super.initState();
+    _googleSignIn = GoogleSignIn(
+      // Web: 傳入 Web 類型 clientId
+      // Android/iOS: clientId 留 null，SDK 自動匹配
+      clientId: kIsWeb ? _googleWebClientId : null,
+      // Android: 需要 serverClientId (Web 類型) 才能拿到 idToken
+      serverClientId: kIsWeb ? null : _googleWebClientId,
+      scopes: ['email', 'profile'],
     );
 
-    setState(() => _isLoading = false);
-
-    if (!mounted) return;
-
-    if (result.success) {
-      // 登入成功 → 跳轉首頁
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomePage()),
-      );
-    } else {
-      // 顯示錯誤
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result.message ?? '登入失敗'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    // 監聽登入狀態變化（Web 自動登入會觸發）
+    _googleSignIn.onCurrentUserChanged.listen(_handleGoogleUser);
+    // 嘗試靜默登入（已登入過的使用者可自動恢復 session）
+    _googleSignIn.signInSilently();
   }
 
-  /// Google 第三方登入
-  Future<void> _googleSignIn() async {
+  /// 處理 Google 登入結果（Web 由 stream 觸發，Mobile 由 signIn 回傳）
+  Future<void> _handleGoogleUser(GoogleSignInAccount? account) async {
+    if (account == null) return;
     setState(() => _isGoogleLoading = true);
 
     try {
-      final googleSignIn = GoogleSignIn(
-        clientId: _googleClientId.isNotEmpty ? _googleClientId : null,
-        scopes: ['email', 'profile'],
-      );
-
-      final account = await googleSignIn.signIn();
-      if (account == null) {
-        // 使用者取消
-        setState(() => _isGoogleLoading = false);
-        return;
-      }
-
       final auth = await account.authentication;
       final idToken = auth.idToken;
 
       if (idToken == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('無法取得 Google ID Token'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        _showError('無法取得 Google ID Token');
         setState(() => _isGoogleLoading = false);
         return;
       }
 
-      // 呼叫後端 Google 登入 API
       final result = await ApiService.googleLogin(
         idToken: idToken,
         email: account.email,
@@ -106,7 +65,6 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       setState(() => _isGoogleLoading = false);
-
       if (!mounted) return;
 
       if (result.success) {
@@ -115,164 +73,95 @@ class _LoginPageState extends State<LoginPage> {
           MaterialPageRoute(builder: (_) => const HomePage()),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result.message ?? 'Google 登入失敗'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showError(result.message ?? 'Google 登入失敗');
       }
     } catch (e) {
       setState(() => _isGoogleLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Google 登入錯誤：$e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      _showError('Google 登入錯誤：$e');
+    }
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+    );
+  }
+
+  /// Mobile 平台：手動觸發 signIn
+  Future<void> _triggerGoogleSignIn() async {
+    setState(() => _isGoogleLoading = true);
+    try {
+      final account = await _googleSignIn.signIn();
+      if (account == null) {
+        // 使用者取消
+        setState(() => _isGoogleLoading = false);
+        return;
       }
+      await _handleGoogleUser(account);
+    } catch (e) {
+      setState(() => _isGoogleLoading = false);
+      _showError('Google 登入錯誤：$e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('登入')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 36.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.picture_as_pdf, size: 80, color: Colors.red),
-              const SizedBox(height: 16),
+              const Icon(Icons.picture_as_pdf, size: 100, color: Colors.red),
+              const SizedBox(height: 20),
               const Text(
                 'PDF Editor',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 32),
-
-              // 用戶名
-              TextFormField(
-                controller: _usernameController,
-                decoration: const InputDecoration(
-                  labelText: '用戶名',
-                  prefixIcon: Icon(Icons.person),
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? '請輸入用戶名' : null,
-              ),
-              const SizedBox(height: 16),
-
-              // 密碼
-              TextFormField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                decoration: InputDecoration(
-                  labelText: '密碼',
-                  prefixIcon: const Icon(Icons.lock),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscurePassword
-                        ? Icons.visibility_off
-                        : Icons.visibility),
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                ),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? '請輸入密碼' : null,
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
-
-              // 忘記密碼
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const ForgotPasswordPage()),
-                  ),
-                  child: const Text('忘記密碼？'),
-                ),
+              Text(
+                '使用 Google 帳號快速登入',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 48),
 
-              // 登入按鈕
-              ElevatedButton(
-                onPressed: _isLoading ? null : _login,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('登入', style: TextStyle(fontSize: 16)),
-              ),
-              const SizedBox(height: 12),
-
-              // 分隔線
-              Row(
-                children: [
-                  const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('或', style: TextStyle(color: Colors.grey.shade600)),
-                  ),
-                  const Expanded(child: Divider()),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // Google 登入按鈕
-              OutlinedButton.icon(
-                onPressed: _isGoogleLoading ? null : _googleSignIn,
+              // ---------- Google 登入按鈕（全平台統一） ----------
+              ElevatedButton.icon(
+                onPressed: _isGoogleLoading ? null : _triggerGoogleSignIn,
                 icon: _isGoogleLoading
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
                       )
                     : Image.network(
                         'https://developers.google.com/identity/images/g-logo.png',
-                        height: 20,
-                        width: 20,
+                        height: 22,
+                        width: 22,
                         errorBuilder: (_, __, ___) =>
                             const Icon(Icons.g_mobiledata, size: 24),
                       ),
                 label: const Text('使用 Google 帳號登入',
-                    style: TextStyle(fontSize: 15)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: BorderSide(color: Colors.grey.shade400),
+                    style: TextStyle(fontSize: 16)),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
               ),
-              const SizedBox(height: 16),
 
-              // 跳轉註冊
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('還沒有帳號？'),
-                  TextButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const RegisterPage()),
-                    ),
-                    child: const Text('立即註冊'),
-                  ),
-                ],
-              ),
+              // 登入中顯示進度指示
+              if (_isGoogleLoading) ...[
+                const SizedBox(height: 20),
+                const Center(child: CircularProgressIndicator()),
+              ],
             ],
           ),
         ),

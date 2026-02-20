@@ -28,22 +28,22 @@ class MockGooglePlayResponse(BaseModel):
     quota_to_add: int
 
 
-# 模擬的商品配置
+# 商品配置
 PRODUCT_QUOTA_MAP = {
     "pdf_editor_50_pages": {
         "amount": 100,  # $1.00
         "quota": 50
     },
     "pdf_editor_5000_pages": {
-        "amount": 5000,  # $50.00
-        "quota": 5000
+        "amount": 400,  # $4.00
+        "quota": 500
     }
 }
 
 # 訂閱制商品配置
 SUBSCRIPTION_PRODUCTS = {
     "pdf_editor_monthly_unlimited": {
-        "amount": 990,  # $9.90/月
+        "amount": 5000,  # $5.00/月
         "duration_days": 30,
         "description": "月訂閱 - 無限使用",
     }

@@ -1,29 +1,38 @@
-"""Create the pdf_editor database in PostgreSQL if it doesn't exist."""
+"""Create the pdfease database in PostgreSQL (Cloud SQL) if it doesn't exist."""
+import os
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
 
 
 def create_database_if_not_exists():
-    """Connect to PostgreSQL and create the pdf_editor database."""
+    """Connect to PostgreSQL and create the database if needed."""
     conn = psycopg2.connect(
-        host="localhost",
-        port=5432,
-        user="postgres",
-        password="0000",
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD,
         dbname="postgres"
     )
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
     cursor = conn.cursor()
 
-    # Check if database exists
-    cursor.execute("SELECT 1 FROM pg_database WHERE datname = 'pdf_editor'")
+    cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
     exists = cursor.fetchone()
 
     if not exists:
-        cursor.execute("CREATE DATABASE pdf_editor")
-        print("Database 'pdf_editor' created successfully!")
+        cursor.execute(f'CREATE DATABASE "{DB_NAME}"')
+        print(f"Database '{DB_NAME}' created successfully!")
     else:
-        print("Database 'pdf_editor' already exists.")
+        print(f"Database '{DB_NAME}' already exists.")
 
     cursor.close()
     conn.close()

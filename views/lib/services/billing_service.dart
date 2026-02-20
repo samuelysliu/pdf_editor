@@ -11,12 +11,11 @@ import 'api_service.dart';
 /// ============================================================
 class BillingProductIds {
   // --- 一次性購買商品 ID（對應 Google Play Console「受管理的商品」）---
-  static const String oneTime50Pages = 'pdf_editor_50_pages'; // TODO: 替換為你的實際商品 ID
-  static const String oneTime5000Pages = 'pdf_editor_5000_pages'; // TODO: 替換為你的實際商品 ID
+  static const String oneTime50Pages = 'pdf_editor_50_pages';
+  static const String oneTime5000Pages = 'pdf_editor_5000_pages';
 
   // --- 訂閱商品 ID（對應 Google Play Console「訂閱」）---
-  static const String monthlyUnlimited = 'pdf_editor_monthly_unlimited'; // TODO: 替換為你的實際訂閱 ID
-
+  static const String monthlyUnlimited = 'pdf_editor_monthly_unlimited';
   /// 所有一次性商品 ID
   static const Set<String> oneTimeProductIds = {
     oneTime50Pages,

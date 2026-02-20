@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Flutter frontend (不需要放進後端 image)
+views/
+
+# Cloud SQL Proxy (本地工具)
+cloud-sql-proxy.exe
+
+# Docs
+*.md
+prd.md
+DEPLOYMENT.md
+
+# Uploads (runtime 產生，不要 bake 進 image)
+uploads/
+
+# Service Account Key (不要直接放進 image，用 Secret Manager)
+*.json

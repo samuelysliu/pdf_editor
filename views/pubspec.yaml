@@ -20,10 +20,10 @@ dependencies:
   shared_preferences: ^2.2.0
 
   # File Picker
-  file_picker: ^6.1.0
+  file_picker: ^8.0.0
 
   # PDF Viewer
-  syncfusion_flutter_pdfviewer: ^24.1.0
+  syncfusion_flutter_pdfviewer: ^27.1.0
 
   # Google Play Billing (In-App Purchase)
   in_app_purchase: ^3.2.0
@@ -38,6 +38,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+
+flutter_launcher_icons:
+  image_path: "assets/images/icon.png"
+  android: "launcher_icon"
+  ios: true
 
 flutter:
   uses-material-design: true
