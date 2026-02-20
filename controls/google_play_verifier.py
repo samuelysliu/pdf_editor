@@ -33,32 +33,34 @@ GOOGLE_PLAY_PACKAGE_NAME: str = os.environ.get(
 # 建立 Google Play Developer API 客戶端
 def _get_android_publisher_service():
     """
+    優先使用 JSON 金鑰檔案（本地開發），
+    若無則自動使用 Application Default Credentials（Cloud Run 等 GCP 環境）。
+
     Returns:
         googleapiclient.discovery.Resource: androidpublisher API 服務
     """
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
+        import google.auth
     except ImportError:
         raise RuntimeError(
             "請先安裝依賴：pip install google-api-python-client google-auth"
         )
 
-    if not GOOGLE_SERVICE_ACCOUNT_KEY_PATH:
-        raise ValueError(
-            "未設定 GOOGLE_SERVICE_ACCOUNT_KEY_PATH，"
-            "請在 controls/google_play_verifier.py 或環境變數中設定。"
-        )
+    SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
 
-    if not os.path.exists(GOOGLE_SERVICE_ACCOUNT_KEY_PATH):
-        raise FileNotFoundError(
-            f"找不到服務帳戶金鑰檔案：{GOOGLE_SERVICE_ACCOUNT_KEY_PATH}"
+    # 方式 1：本地開發 — 使用 JSON 金鑰檔案
+    if GOOGLE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(GOOGLE_SERVICE_ACCOUNT_KEY_PATH):
+        logger.info("[GooglePlayVerifier] 使用 JSON 金鑰檔案認證")
+        credentials = service_account.Credentials.from_service_account_file(
+            GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
+            scopes=SCOPES,
         )
-
-    credentials = service_account.Credentials.from_service_account_file(
-        GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
-        scopes=["https://www.googleapis.com/auth/androidpublisher"],
-    )
+    else:
+        # 方式 2：Cloud Run — 使用 Application Default Credentials (ADC)
+        logger.info("[GooglePlayVerifier] 使用 Application Default Credentials (ADC)")
+        credentials, _project = google.auth.default(scopes=SCOPES)
 
     service = build("androidpublisher", "v3", credentials=credentials)
     return service
@@ -204,5 +206,16 @@ def verify_subscription(
 
 
 def is_configured() -> bool:
-    """檢查 Google Play 驗證是否已正確設定"""
-    return bool(GOOGLE_SERVICE_ACCOUNT_KEY_PATH) and bool(GOOGLE_PLAY_PACKAGE_NAME)
+    """檢查 Google Play 驗證是否已正確設定（ADC 在 Cloud Run 上自動可用）"""
+    if not GOOGLE_PLAY_PACKAGE_NAME:
+        return False
+    # 有 JSON 金鑰檔案，或者跑在 GCP 環境中（ADC 自動可用）都算已設定
+    if GOOGLE_SERVICE_ACCOUNT_KEY_PATH and os.path.exists(GOOGLE_SERVICE_ACCOUNT_KEY_PATH):
+        return True
+    # 嘗試偵測 ADC 是否可用（Cloud Run / GCE / GKE 等）
+    try:
+        import google.auth
+        google.auth.default()
+        return True
+    except Exception:
+        return False

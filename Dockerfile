@@ -31,12 +31,8 @@ COPY modules/ modules/
 
 RUN mkdir -p uploads
 
-# Service Account Key
-COPY project-c02ae071-e5c5-4fc4-9dc-29a1f42dbaea.json .
-
 # Cloud Run 會自動設定 PORT 環境變數，預設為 8080
 ENV PORT=8080
-ENV GOOGLE_SERVICE_ACCOUNT_KEY_PATH=project-c02ae071-e5c5-4fc4-9dc-29a1f42dbaea.json
 
 EXPOSE ${PORT}
 

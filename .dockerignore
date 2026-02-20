@@ -28,5 +28,4 @@ DEPLOYMENT.md
 # Uploads (runtime 產生，不要 bake 進 image)
 uploads/
 
-# 排除其他 JSON，但保留 Service Account Key
-!project-c02ae071-e5c5-4fc4-9dc-29a1f42dbaea.json
+
